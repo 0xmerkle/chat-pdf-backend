@@ -1,0 +1,7 @@
+output.txt
+*.json
+pdfvenv
+*.pyc
+*.log
+__pycache__/
+.env
