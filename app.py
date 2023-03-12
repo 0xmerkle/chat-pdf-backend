@@ -5,32 +5,29 @@ import os
 import tempfile
 from langchain.document_loaders import PagedPDFSplitter
 from firebase_admin import auth, credentials
-
-creds_path = os.path.join(os.path.dirname(__file__), "google-credentials.json")
-
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-
-
-from google.cloud import storage
+import json
+from dotenv import load_dotenv
 from pinecone_utils import (
     load_pages_to_pinecone,
     get_embeddings,
 )
 from query_utils import agent_chat_with_vectordb_qa
 
+load_dotenv()
+
+# Initialize the Firebase Admin SDK
+service_account_key_json = os.environ.get("SERVICE_ACCOUNT_KEY")
+service_account_key = json.loads(service_account_key_json)
+cred = credentials.Certificate(service_account_key)
+firebase_admin.initialize_app(cred)
+
+origins = json.loads(os.environ.get("ORIGINS"))
+
 app = Flask(__name__)
 CORS(
     app,
-    resources={
-        r"/*": {"origins": "http://localhost:3000", "supports_credentials": True}
-    },
+    resources={r"/*": {"origins": origins, "supports_credentials": True}},
 )
-app.secret_key = os.environ.get("SECRET_KEY")
-
-# Initialize the Firebase Admin SDK
-key_path = os.path.join(os.path.dirname(__file__), "service_account_key.json")
-cred = credentials.Certificate(key_path)
-firebase_admin.initialize_app(cred)
 
 
 def load_pdf(filePath):
@@ -81,39 +78,6 @@ def authenticate_user():
 @app.route("/", methods=["GET"])
 def hello():
     return "Hello, World!"
-
-
-project_id = "chat-pdf"
-bucket_name = "chat-pdf-text"
-
-
-@app.route("/upload", methods=["POST"])
-async def upload():
-    try:
-        file = request.files["upload"]
-        if file:
-            client = storage.Client(project=project_id)
-            bucket = client.get_bucket(bucket_name)
-            blob = bucket.blob(file.filename)
-            content = file.read()
-            blob.upload_from_string(content, content_type=file.content_type)
-            pdf_uri = f"gs://{bucket_name}/{file.filename}"
-            print(pdf_uri)
-            ## works
-            gcs_destination_uri = "gs://chat-pdf-text/results/"
-            docs = async_detect_document(pdf_uri, gcs_destination_uri)
-            embeddings = get_embeddings(docs)
-
-            print("loading to pinecone...")
-            load_pages_to_pinecone(docs, embeddings)
-            print("annotated text", docs)
-
-            return jsonify(text=docs, status=200)
-        else:
-            return "No file found"
-    except Exception as e:
-        print(e)
-        return "Error"
 
 
 @app.route("/loadPdf", methods=["POST"])
