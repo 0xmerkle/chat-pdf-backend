@@ -7,6 +7,7 @@ from langchain.document_loaders import PagedPDFSplitter
 from firebase_admin import auth, credentials
 import json
 from dotenv import load_dotenv
+
 from pinecone_utils import (
     load_pages_to_pinecone,
     get_embeddings,
@@ -30,17 +31,35 @@ CORS(
 )
 
 
+def add_user_id(docs, user_id):
+    for doc in docs:
+        doc.metadata = {**doc.metadata, "user_id": user_id}
+    return docs
+
+
 def load_pdf(filePath):
     loader = PagedPDFSplitter(filePath)
     pages = loader.load_and_split()
     return pages
 
 
+def load_pdf_and_add_metadata(filePath):
+    loader = PagedPDFSplitter(filePath)
+    pages = loader.load_and_split()
+    f = pages[0]
+    print(f.metadata)
+    print("adding metadata to pages for user", request.user.uid)
+    augmented_pages = add_user_id(pages, request.user.uid)
+    print("augmented_pages", augmented_pages[0])
+    return augmented_pages
+
+
 def process_pdf(file):
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
         file.save(tmp_file.name)
         tmp_file_path = tmp_file.name
-    pages = load_pdf(tmp_file_path)
+    # pages = load_pdf(tmp_file_path)
+    pages = load_pdf_and_add_metadata(tmp_file_path)
     os.remove(tmp_file_path)
     return pages
 
@@ -64,7 +83,7 @@ def authenticate_user():
     auth_header = request.headers.get("Authorization")
     print("auth_header", auth_header)
     if auth_header:
-        token = auth_header.split(" ")[1]
+        token = auth_header.split(" ")[0]
         # Verify the user's Firebase ID token
         user = verify_token(token)
         print(user, "user")
@@ -88,6 +107,7 @@ async def loadPdf():
         file = request.files.get("upload")
         print(file)
         if file:
+            print(request.user)
             pages = process_pdf(file)
 
             print("loading to pinecone...")
@@ -110,7 +130,23 @@ async def chat_with_agent():
         data = request.get_json()
         query = data["query"]
         if query:
-            res = agent_chat_with_vectordb_qa(query)
+            res = agent_chat_with_vectordb_qa(query, request.user.uid)
+            return jsonify(res=res, status=200)
+        else:
+            return "No file found"
+    except Exception as e:
+        print(e)
+        return "Error"
+
+
+@app.route("/get_context_info_from_documents", methods=["POST"])
+async def get_context_info_from_documents():
+    if not request.user:
+        abort(401, description="Authorization header not found")
+    try:
+        initial_query = "describe the context of the documents that are provided and suggest things i could ask about"
+        if initial_query:
+            res = agent_chat_with_vectordb_qa(initial_query, request.user.uid)
             return jsonify(res=res, status=200)
         else:
             return "No file found"
