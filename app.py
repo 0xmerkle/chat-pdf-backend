@@ -30,6 +30,8 @@ CORS(
     resources={r"/*": {"origins": origins, "supports_credentials": True}},
 )
 
+MAX_CHARACTERS = 2000
+
 
 def add_user_id(docs, user_id):
     for doc in docs:
@@ -40,6 +42,8 @@ def add_user_id(docs, user_id):
 def load_pdf(filePath):
     loader = PagedPDFSplitter(filePath)
     pages = loader.load_and_split()
+    if len(pages) > 20:
+        raise Exception("Too many pages")
     return pages
 
 
@@ -129,6 +133,8 @@ async def chat_with_agent():
     try:
         data = request.get_json()
         query = data["query"]
+        if len(query) > MAX_CHARACTERS:
+            return jsonify(error=f"Query too long! Length: {len(query)}", status=400)
         if query:
             res = agent_chat_with_vectordb_qa(query, request.user.uid)
             return jsonify(res=res, status=200)
